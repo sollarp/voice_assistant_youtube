@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from contextlib import contextmanager
 
 import numpy as np
@@ -11,6 +12,7 @@ from jarvis.log import log
 
 _INPUT_RATES = (RATE, 48000, 44100, 32000, 22050)
 _OUTPUT_RATES = (OUTPUT_RATE, 48000, 44100, 16000)
+_HW_CARD = re.compile(r"hw:(\d+)")
 
 
 @contextmanager
@@ -102,7 +104,27 @@ def _supports(pa: pyaudio.PyAudio, info: dict, rate: int, *, input_device: bool)
         return False
 
 
-def open_input(pa: pyaudio.PyAudio) -> tuple[pyaudio.Stream, int, int]:
+def card_of(name: str) -> str | None:
+    match = _HW_CARD.search(name)
+    return match.group(1) if match else None
+
+
+def _output_rank(info: dict, mic_card: str | None) -> tuple[int, str]:
+    name = str(info.get("name") or "")
+    lowered = name.lower()
+    # The 3.5 mm jack shows up as the Headphones device, separate from the USB mic.
+    if "headphone" in lowered:
+        return (0, lowered)
+    if mic_card and f"hw:{mic_card}" in lowered:
+        return (6, lowered)
+    if "hdmi" in lowered or "vc4" in lowered or "usb" in lowered:
+        return (5, lowered)
+    if lowered == "default":
+        return (3, lowered)
+    return (2, lowered)
+
+
+def open_input(pa: pyaudio.PyAudio) -> tuple[pyaudio.Stream, int, int, str]:
     errors: list[str] = []
     with _quiet_alsa():
         for info in _devices(pa, input_device=True):
@@ -127,15 +149,17 @@ def open_input(pa: pyaudio.PyAudio) -> tuple[pyaudio.Stream, int, int]:
                 log(f"microphone {name} @ {rate} Hz")
                 if rate != RATE:
                     log(f"resampling microphone {rate} Hz -> {RATE} Hz")
-                return stream, rate, frames
+                return stream, rate, frames, name
     detail = "; ".join(errors[-3:]) if errors else "no capture device accepted a supported rate"
     raise OSError(f"Could not open a microphone. {detail}")
 
 
-def open_output(pa: pyaudio.PyAudio) -> tuple[pyaudio.Stream, int]:
+def open_output(pa: pyaudio.PyAudio, prefer_name: str | None = None) -> tuple[pyaudio.Stream, int]:
     errors: list[str] = []
+    card = card_of(prefer_name or "")
+    outputs = sorted(_devices(pa, input_device=False), key=lambda info: _output_rank(info, card))
     with _quiet_alsa():
-        for info in _devices(pa, input_device=False):
+        for info in outputs:
             name = str(info.get("name") or info["index"])
             index = int(info["index"])
             for rate in _candidate_rates(info, _OUTPUT_RATES):

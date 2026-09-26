@@ -15,7 +15,7 @@ from jarvis.log import log
 class Microphone:
     def __init__(self) -> None:
         self._pa = pyaudio.PyAudio()
-        self.stream, self._rate, self._native_chunk = open_input(self._pa)
+        self.stream, self._rate, self._native_chunk, self.device_name = open_input(self._pa)
         self.stream.start_stream()
 
     def read(self) -> bytes:

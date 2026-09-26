@@ -51,7 +51,7 @@ class Assistant:
             log(f"mpv unavailable: {exc}")
         mic = Microphone()
         wake = WakeWord()
-        speaker = Speaker(self._player)
+        speaker = Speaker(mic.device_name)
         log("listening")
         streak = 0
         media_on = False

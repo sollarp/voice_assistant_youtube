@@ -1,13 +1,11 @@
-import os
-import tempfile
+import queue
 import threading
-import wave
 
 import numpy as np
+import pyaudio
 
-from jarvis.audio.player import MPVController
+from jarvis.audio.devices import open_output, resample
 from jarvis.config import OUTPUT_RATE
-from jarvis.log import log
 
 
 def _tone(frequency: float, seconds: float) -> bytes:
@@ -22,57 +20,56 @@ def _tone(frequency: float, seconds: float) -> bytes:
 
 
 class Speaker:
-    """Plays Gemini's voice on the same mpv that plays the song."""
+    """Plays Gemini's voice on the Pi 3.5 mm headphone jack."""
 
-    def __init__(self, player: MPVController) -> None:
-        self._player = player
-        self._chunks: list[bytes] = []
-        self._lock = threading.Lock()
+    def __init__(self, prefer_name: str | None = None) -> None:
+        self._pa = pyaudio.PyAudio()
+        self._stream, self._rate = open_output(self._pa, prefer_name)
+        self._queue: queue.Queue[bytes | None] = queue.Queue()
         self._skip = False
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
 
     def write(self, pcm: bytes) -> None:
         if not pcm:
             return
         self._skip = False
-        with self._lock:
-            self._chunks.append(pcm)
+        if self._rate != OUTPUT_RATE:
+            pcm = resample(pcm, OUTPUT_RATE, self._rate)
+        self._queue.put(pcm)
 
     def drop(self) -> None:
         self._skip = True
-        with self._lock:
-            self._chunks.clear()
+        while True:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                return
+            else:
+                self._queue.task_done()
 
     def beep(self) -> None:
         self.write(_tone(880, 0.18))
         self.drain()
 
     def drain(self) -> None:
-        with self._lock:
-            if self._skip:
-                self._chunks.clear()
-                self._skip = False
-                return
-            pcm = b"".join(self._chunks)
-            self._chunks.clear()
-        if not pcm:
-            return
-        seconds = len(pcm) / 2 / OUTPUT_RATE
-        fd, path = tempfile.mkstemp(suffix=".wav")
-        os.close(fd)
-        try:
-            with wave.open(path, "wb") as handle:
-                handle.setnchannels(1)
-                handle.setsampwidth(2)
-                handle.setframerate(OUTPUT_RATE)
-                handle.writeframes(pcm)
-            log(f"speaking {seconds:.1f}s")
-            if not self._player.play_clip(path, seconds):
-                log("voice playback failed")
-        finally:
-            try:
-                os.remove(path)
-            except OSError:
-                pass
+        self._queue.join()
 
     def close(self) -> None:
-        return
+        self._queue.put(None)
+        self._thread.join(timeout=2)
+        self._stream.stop_stream()
+        self._stream.close()
+        self._pa.terminate()
+
+    def _loop(self) -> None:
+        while True:
+            item = self._queue.get()
+            try:
+                if item is None:
+                    return
+                if self._skip:
+                    continue
+                self._stream.write(item)
+            finally:
+                self._queue.task_done()
