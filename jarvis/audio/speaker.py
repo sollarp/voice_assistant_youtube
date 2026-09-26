@@ -4,7 +4,8 @@ import threading
 import numpy as np
 import pyaudio
 
-from jarvis.config import CHANNELS, FORMAT, OUTPUT_RATE
+from jarvis.audio.devices import open_output, resample
+from jarvis.config import OUTPUT_RATE
 
 
 def _tone(frequency: float, seconds: float) -> bytes:
@@ -23,19 +24,17 @@ class Speaker:
 
     def __init__(self) -> None:
         self._pa = pyaudio.PyAudio()
-        self._stream = self._pa.open(
-            format=FORMAT,
-            channels=CHANNELS,
-            rate=OUTPUT_RATE,
-            output=True,
-        )
+        self._stream, self._rate = open_output(self._pa)
         self._queue: queue.Queue[bytes | None] = queue.Queue()
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
     def write(self, pcm: bytes) -> None:
-        if pcm:
-            self._queue.put(pcm)
+        if not pcm:
+            return
+        if self._rate != OUTPUT_RATE:
+            pcm = resample(pcm, OUTPUT_RATE, self._rate)
+        self._queue.put(pcm)
 
     def beep(self) -> None:
         self.write(_tone(880, 0.09))

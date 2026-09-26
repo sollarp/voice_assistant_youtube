@@ -7,35 +7,24 @@ import openwakeword
 import pyaudio
 from openwakeword.model import Model
 
-from jarvis.config import (
-    CHANNELS,
-    CHUNK,
-    FORMAT,
-    RATE,
-    WAKE_MODEL,
-    WAKE_THRESHOLD,
-)
+from jarvis.audio.devices import open_input, resample
+from jarvis.config import CHUNK, RATE, WAKE_MODEL, WAKE_THRESHOLD
 from jarvis.log import log
 
 
 class Microphone:
     def __init__(self) -> None:
         self._pa = pyaudio.PyAudio()
-        self.stream = self._pa.open(
-            format=FORMAT,
-            channels=CHANNELS,
-            rate=RATE,
-            input=True,
-            frames_per_buffer=CHUNK,
-        )
+        self.stream, self._rate, self._native_chunk = open_input(self._pa)
         self.stream.start_stream()
 
     def read(self) -> bytes:
         try:
-            return self.stream.read(CHUNK, exception_on_overflow=False)
+            native = self.stream.read(self._native_chunk, exception_on_overflow=False)
         except OSError as exc:
             log(f"mic read error: {exc}")
             return b"\x00" * (CHUNK * 2)
+        return resample(native, self._rate, RATE, CHUNK)
 
     def close(self) -> None:
         self.stream.stop_stream()
