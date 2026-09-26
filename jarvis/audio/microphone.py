@@ -77,7 +77,7 @@ class WakeWord:
         return best
 
     def triggered(self, pcm: bytes) -> bool:
-        return self.score(pcm) >= WAKE_THRESHOLD
+        return self.score(pcm) > WAKE_THRESHOLD
 
     def reset(self) -> None:
         self._model.reset()

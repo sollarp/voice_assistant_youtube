@@ -1,4 +1,3 @@
-from jarvis.intent.handler import IntentHandler
-from jarvis.intent.parse import extract_json, normalize
+from jarvis.intent.handler import MusicControl
 
-__all__ = ["IntentHandler", "extract_json", "normalize"]
+__all__ = ["MusicControl"]

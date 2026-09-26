@@ -1,65 +1,72 @@
-import json
+from __future__ import annotations
 
-from jarvis.audio.player import Player
-from jarvis.audio.tts import speak
-from jarvis.config import MUSIC_CONTROL_ACTIONS, SEEK_SECONDS_DEFAULT
-from jarvis.domain.intent import Intent
+import asyncio
+
+from jarvis.audio.player import MPVController
+from jarvis.config import MUSIC_VOLUME_DUCKED
 from jarvis.log import log
-from jarvis.media.playlists import PlaylistStore
-from jarvis.media.youtube import search_audio
+from jarvis.media.youtube import YouTubeResolver, studio_query
 
 
-class IntentHandler:
-    def __init__(self, player: Player, playlists: PlaylistStore) -> None:
+class MusicControl:
+    def __init__(self, player: MPVController, resolver: YouTubeResolver) -> None:
         self._player = player
-        self._playlists = playlists
+        self._resolver = resolver
+        self._query: str | None = None
+        self._offset = 1
 
-    def run(self, intent: Intent) -> None:
-        speak(intent.spoken_response)
+    async def handle(self, args: dict) -> dict:
+        return await asyncio.to_thread(self._run, args)
 
-        if intent.action in {"play_music", "search_alternate"}:
-            self._play(intent)
-            return
-        if intent.action == "add_to_playlist":
-            self._add_to_playlist(intent)
-            return
-        if intent.action in MUSIC_CONTROL_ACTIONS:
-            self._control(intent)
+    def _run(self, args: dict) -> dict:
+        action = str(args.get("action") or "").strip().lower()
+        query = args.get("query")
+        query = query.strip() if isinstance(query, str) else ""
+        query = query or None
+        try:
+            offset = int(args.get("offset") or 1)
+        except (TypeError, ValueError):
+            offset = 1
+        offset = max(offset, 1)
+        log(f"music {action} query={query!r} offset={offset}")
 
-    def _play(self, intent: Intent) -> None:
-        if not intent.song_query:
-            speak("I need a song name before I can search YouTube.")
-            return
-        offset = intent.version_offset or 1
-        log(f"searching youtube for {intent.song_query!r} #{offset}")
-        result = search_audio(intent.song_query, offset=offset)
-        print(result["webpage_url"], flush=True)
-        log(f"streaming {result['title']}")
-        self._player.play(result["stream_url"])
+        if action == "pause":
+            return {"ok": self._player.pause(), "action": action}
+        if action == "resume":
+            return {"ok": self._player.resume(), "action": action}
+        if action == "next_version":
+            return self._next(query, offset)
+        if action == "play":
+            if not query:
+                return {"ok": False, "error": "missing song query"}
+            return self._play(query, offset)
+        return {"ok": False, "error": f"unsupported action {action}"}
 
-    def _add_to_playlist(self, intent: Intent) -> None:
-        if not intent.song_query or not intent.playlist_name:
-            speak("I need both a song and a playlist name to save that.")
-            return
-        offset = intent.version_offset or 1
-        result = search_audio(intent.song_query, offset=offset)
-        store = self._playlists.add(
-            intent.playlist_name, result["title"], result["webpage_url"]
-        )
-        print(json.dumps(store, indent=2), flush=True)
+    def _next(self, query: str | None, offset: int) -> dict:
+        song = studio_query(query) if query else None
+        same = bool(song and self._query and song == self._query)
+        query = query or self._query
+        if not query:
+            return {"ok": False, "error": "no song to switch"}
+        if same or not song:
+            offset = max(offset, self._offset + 1, 2)
+        else:
+            offset = max(offset, 2)
+        return self._play(query, offset)
 
-    def _control(self, intent: Intent) -> None:
-        if not self._player.is_playing():
-            speak("Nothing is playing right now.")
-            return
-        if intent.action == "pause_music" and not self._player.pause():
-            speak("I could not pause the music.")
-        elif intent.action == "resume_music" and not self._player.resume():
-            speak("I could not resume the music.")
-        elif intent.action == "stop_music":
-            self._player.stop()
-            log("stopped")
-        elif intent.action == "seek_music":
-            seconds = intent.seek_seconds or SEEK_SECONDS_DEFAULT
-            if not self._player.seek(int(seconds)):
-                speak("I could not jump in the track.")
+    def _play(self, query: str, offset: int) -> dict:
+        track = self._resolver.resolve(query, offset=offset)
+        if not self._player.play(track["stream_url"]):
+            return {"ok": False, "error": "mpv rejected the stream"}
+        self._player.set_volume(MUSIC_VOLUME_DUCKED)
+        self._query = studio_query(query)
+        self._offset = offset
+        print(track["webpage_url"], flush=True)
+        log(f"streaming {track['title']}")
+        return {
+            "ok": True,
+            "action": "play",
+            "title": track["title"],
+            "url": track["webpage_url"],
+            "offset": offset,
+        }

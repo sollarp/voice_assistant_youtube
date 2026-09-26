@@ -2,93 +2,119 @@ import json
 import os
 import socket
 import subprocess
+import time
 
-from jarvis.config import (
-    MPV_IPC_PATH,
-    MUSIC_VOLUME_DUCKED,
-    MUSIC_VOLUME_NORMAL,
-)
+from jarvis.config import MPV_IPC_PATH
 from jarvis.log import log
 
 
-class Player:
+class MPVController:
     def __init__(self) -> None:
         self._proc: subprocess.Popen | None = None
+        self._started = False
 
-    def is_playing(self) -> bool:
-        return self._proc is not None and self._proc.poll() is None
-
-    def play(self, url: str) -> None:
-        self.stop()
+    def ensure(self) -> None:
+        if self._alive():
+            return
+        if os.path.exists(MPV_IPC_PATH):
+            try:
+                os.remove(MPV_IPC_PATH)
+            except OSError:
+                pass
         self._proc = subprocess.Popen(
             [
                 "mpv",
                 "--no-video",
-                "--no-terminal",
+                "--idle",
                 "--really-quiet",
-                f"--volume={MUSIC_VOLUME_NORMAL}",
                 f"--input-ipc-server={MPV_IPC_PATH}",
-                url,
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-        log("playback started")
+        self._started = True
+        for _ in range(40):
+            if self._alive():
+                log("mpv ready")
+                return
+            time.sleep(0.05)
+        raise RuntimeError("mpv ipc socket did not open")
 
-    def stop(self) -> None:
-        proc = self._proc
-        self._proc = None
-        if proc is not None and proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait(timeout=1)
-        try:
-            os.remove(MPV_IPC_PATH)
-        except OSError:
-            pass
+    def play(self, url: str) -> bool:
+        self.ensure()
+        return self._command(["loadfile", url, "replace"])
 
     def pause(self) -> bool:
+        self.ensure()
         ok = self._command(["set_property", "pause", True])
         if ok:
             log("paused")
         return ok
 
     def resume(self) -> bool:
+        self.ensure()
         ok = self._command(["set_property", "pause", False])
         if ok:
             log("resumed")
         return ok
 
-    def seek(self, seconds: int) -> bool:
-        ok = self._command(["seek", seconds, "relative"])
-        if ok:
-            log(f"seek {seconds}s")
-        return ok
+    def set_volume(self, level: int) -> bool:
+        try:
+            self.ensure()
+        except Exception as exc:
+            log(f"mpv unavailable: {exc}")
+            return False
+        return self._command(["set_property", "volume", int(level)])
 
-    def duck(self) -> None:
-        if not self.is_playing():
+    def close(self) -> None:
+        if not self._started:
             return
-        self._command(["set_property", "volume", MUSIC_VOLUME_DUCKED])
+        if self._alive():
+            self._command(["quit"])
+        proc = self._proc
+        self._proc = None
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=1)
 
-    def restore_volume(self) -> None:
-        if not self.is_playing():
-            return
-        self._command(["set_property", "volume", MUSIC_VOLUME_NORMAL])
-
-    def _command(self, command: list) -> bool:
-        if not self.is_playing() or not os.path.exists(MPV_IPC_PATH):
+    def _alive(self) -> bool:
+        if not os.path.exists(MPV_IPC_PATH):
             return False
         try:
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            sock.settimeout(0.4)
+            sock.settimeout(0.2)
             sock.connect(MPV_IPC_PATH)
-            sock.sendall((json.dumps({"command": command}) + "\n").encode("utf-8"))
             sock.close()
             return True
-        except OSError as exc:
-            log(f"player ipc failed: {exc}")
+        except OSError:
             return False
+
+    def _command(self, command: list) -> bool:
+        for _ in range(3):
+            try:
+                sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                sock.settimeout(0.4)
+                sock.connect(MPV_IPC_PATH)
+                sock.sendall((json.dumps({"command": command}) + "\n").encode())
+                raw = b""
+                while b"\n" not in raw:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    raw += chunk
+                sock.close()
+                if not raw:
+                    return False
+                payload = json.loads(raw.decode().split("\n", 1)[0])
+                if payload.get("error") == "success":
+                    return True
+                log(f"mpv command failed: {payload.get('error')}")
+                return False
+            except OSError:
+                time.sleep(0.1)
+        log(f"mpv ipc failed: {command[0]}")
+        return False

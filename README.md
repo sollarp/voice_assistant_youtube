@@ -1,6 +1,8 @@
 # Jarvis
 
-Linux voice assistant. Say **Hey Jarvis**, then a command. Wake word runs locally. Speech goes to Gemini. Music plays through `mpv`.
+Linux voice assistant. Say **Hey Jarvis**, then a command. The wake word runs locally. One Gemini Live session hears you, speaks the reply, and can search the web or control music. Playback goes through a headless `mpv`.
+
+Jarvis answers in the language you speak: English or Hungarian.
 
 ## Requirements
 
@@ -32,12 +34,23 @@ GOOGLE_API_KEY=your-key
 
 ## Run
 
+From the project directory, with the virtualenv activated:
+
 ```bash
 source .venv/bin/activate
 python3 main.py
 ```
 
-Or `python3 -m jarvis`.
+`python3 -m jarvis` does the same thing.
+
+When the terminal prints `listening`, the microphone is open. Say **Hey Jarvis**, wait for the beep, then speak. Examples:
+
+- “Play Get Lucky by Daft Punk”
+- “Pause” / “Resume” / “Play another version”
+- “What’s the weather in London?”
+- “Milyen az idő Londonban?”
+
+Jarvis ducks music to 15% while you talk, speaks the reply, then restores volume to 100%. Press `Ctrl+C` to stop. `mpv` shuts down with it.
 
 ## Commands
 
@@ -45,13 +58,12 @@ After **Hey Jarvis**:
 
 | You say | What happens |
 |---|---|
-| play [song] | search YouTube and stream audio |
-| another version | next YouTube result |
-| add [song] to my [list] | store title and link in memory |
-| pause / resume / stop | control the current track |
-| jump 21 seconds | seek forward (or back with a negative number) |
+| play [song] | search for the official studio track and stream it |
+| another version | next official match for the current song |
+| pause / resume | hold or continue the current track |
+| a factual question | Google Search, then a spoken answer under 20 seconds |
 
-Music ducks while you speak, then volume returns. Playback stays in the background so you can wake Jarvis again during a song.
+The same commands work in Hungarian. `mpv` stays running in the background so you can wake Jarvis again during a song.
 
 ## Environment
 
@@ -59,8 +71,7 @@ Music ducks while you speak, then volume returns. Playback stays in the backgrou
 |---|---|---|
 | `GOOGLE_API_KEY` | unset | Gemini API key |
 | `GEMINI_API_KEY` | unset | fallback key name |
-| `GEMINI_MODEL` | `gemini-3.1-flash-live-preview` | live microphone session |
-| `JSON_MODEL` | `gemini-2.5-flash` | intent JSON (`play_music`, pause, seek, …) |
+| `GEMINI_MODEL` | `gemini-3.8-live` | live session: speech in, speech out, search, music tool |
 
 `.env` is loaded automatically and is gitignored.
 
@@ -70,8 +81,8 @@ Music ducks while you speak, then volume returns. Playback stays in the backgrou
 main.py                 entry
 jarvis/config.py        constants and env
 jarvis/runtime.py       wake loop
-jarvis/audio/           mic, wake word, TTS, mpv
-jarvis/media/           YouTube, playlists
-jarvis/intent/          parse and execute actions
-jarvis/llm/             live session and text routing
+jarvis/audio/           mic, wake word, speaker, mpv
+jarvis/media/           YouTube resolver
+jarvis/intent/          music tool
+jarvis/llm/             Gemini Live session
 ```
