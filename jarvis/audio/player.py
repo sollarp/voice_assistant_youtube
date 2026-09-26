@@ -12,6 +12,7 @@ class MPVController:
     def __init__(self) -> None:
         self._proc: subprocess.Popen | None = None
         self._started = False
+        self._current_url: str | None = None
 
     def ensure(self) -> None:
         if self._alive():
@@ -43,33 +44,46 @@ class MPVController:
 
     def play(self, url: str) -> bool:
         self.ensure()
-        return self._command(["loadfile", url, "replace"])
+        ok = self._command(["loadfile", url, "replace"])
+        self._current_url = url if ok else None
+        return ok
 
     def play_clip(self, wav_path: str, seconds: float) -> bool:
         """Play a short wav on this mpv, then put the song back."""
         self.ensure()
-        saved_path = None
-        saved_pos = None
-        saved_pause = None
-        if self.has_media():
-            saved_path = self._property("path")
-            saved_pos = self._property("time-pos")
-            saved_pause = self._property("pause")
+        resume_url = self._current_url
+        position = None
+        paused = False
+        if resume_url and self.has_media():
+            pos = self._property("time-pos")
+            if isinstance(pos, (int, float)):
+                position = float(pos)
+            paused = self._property("pause") is True
         saved_volume = self._property("volume")
         self._command(["set_property", "volume", 100])
         if not self._command(["loadfile", wav_path, "replace"]):
             return False
         time.sleep(max(0.3, min(seconds + 0.8, 25)))
-        if isinstance(saved_path, str) and saved_path:
-            self._command(["loadfile", saved_path, "replace"])
-            time.sleep(0.5)
-            if isinstance(saved_pos, (int, float)) and float(saved_pos) > 0.4:
-                self._command(["seek", float(saved_pos), "absolute"])
-            if saved_pause is True:
-                self._command(["set_property", "pause", True])
+        if resume_url:
+            log("resuming song")
+            if not self._command(["loadfile", resume_url, "replace"]):
+                log("could not resume the song")
+            else:
+                self._wait_until_playing()
+                if position is not None and position > 1.5:
+                    self._command(["seek", position, "absolute"])
+                if paused:
+                    self._command(["set_property", "pause", True])
         if isinstance(saved_volume, (int, float)):
             self._command(["set_property", "volume", int(saved_volume)])
         return True
+
+    def _wait_until_playing(self) -> None:
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if self._property("idle-active") is False:
+                return
+            time.sleep(0.1)
 
     def _property(self, name: str):
         payload = self._request(["get_property", name])
@@ -96,6 +110,7 @@ class MPVController:
             return False
         ok = self._command(["stop"])
         if ok:
+            self._current_url = None
             log("stopped")
         return ok
 
