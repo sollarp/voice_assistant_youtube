@@ -1,15 +1,13 @@
 import os
-import queue
-import subprocess
+import tempfile
 import threading
-import time
+import wave
 
 import numpy as np
 
+from jarvis.audio.player import MPVController
 from jarvis.config import OUTPUT_RATE
 from jarvis.log import log
-
-_VOICE_FIFO = "/tmp/jarvis-voice.pcm"
 
 
 def _tone(frequency: float, seconds: float) -> bytes:
@@ -24,114 +22,57 @@ def _tone(frequency: float, seconds: float) -> bytes:
 
 
 class Speaker:
-    """Plays Gemini's voice through mpv, on the same output as the song."""
+    """Plays Gemini's voice on the same mpv that plays the song."""
 
-    def __init__(self) -> None:
-        self._queue: queue.Queue[bytes | None] = queue.Queue()
-        self._skip = False
-        self._pending = 0.0
+    def __init__(self, player: MPVController) -> None:
+        self._player = player
+        self._chunks: list[bytes] = []
         self._lock = threading.Lock()
-        self._pipe = None
-        self._proc: subprocess.Popen | None = None
-        self._start()
-        self._thread = threading.Thread(target=self._loop, daemon=True)
-        self._thread.start()
-
-    def _start(self) -> None:
-        if os.path.exists(_VOICE_FIFO):
-            os.remove(_VOICE_FIFO)
-        os.mkfifo(_VOICE_FIFO)
-        self._proc = subprocess.Popen(
-            [
-                "mpv",
-                "--no-video",
-                "--really-quiet",
-                "--no-terminal",
-                "--demuxer=rawaudio",
-                f"--demuxer-rawaudio-rate={OUTPUT_RATE}",
-                "--demuxer-rawaudio-channels=1",
-                "--demuxer-rawaudio-format=s16le",
-                _VOICE_FIFO,
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        opened: list = []
-
-        def _open() -> None:
-            opened.append(open(_VOICE_FIFO, "wb", buffering=0))
-
-        opener = threading.Thread(target=_open, daemon=True)
-        opener.start()
-        opener.join(3)
-        if not opened:
-            raise RuntimeError("voice player did not start")
-        self._pipe = opened[0]
-        log("voice player ready")
+        self._skip = False
 
     def write(self, pcm: bytes) -> None:
         if not pcm:
             return
         self._skip = False
-        self._queue.put(pcm)
+        with self._lock:
+            self._chunks.append(pcm)
 
     def drop(self) -> None:
         self._skip = True
         with self._lock:
-            self._pending = 0.0
-        while True:
-            try:
-                self._queue.get_nowait()
-            except queue.Empty:
-                return
-            else:
-                self._queue.task_done()
+            self._chunks.clear()
 
     def beep(self) -> None:
-        self.write(_tone(880, 0.09))
+        self.write(_tone(880, 0.18))
         self.drain()
 
     def drain(self) -> None:
-        self._queue.join()
         with self._lock:
-            wait = self._pending
-            self._pending = 0.0
-        if wait > 0:
-            time.sleep(min(wait, 20))
+            if self._skip:
+                self._chunks.clear()
+                self._skip = False
+                return
+            pcm = b"".join(self._chunks)
+            self._chunks.clear()
+        if not pcm:
+            return
+        seconds = len(pcm) / 2 / OUTPUT_RATE
+        fd, path = tempfile.mkstemp(suffix=".wav")
+        os.close(fd)
+        try:
+            with wave.open(path, "wb") as handle:
+                handle.setnchannels(1)
+                handle.setsampwidth(2)
+                handle.setframerate(OUTPUT_RATE)
+                handle.writeframes(pcm)
+            log(f"speaking {seconds:.1f}s")
+            if not self._player.play_clip(path, seconds):
+                log("voice playback failed")
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
     def close(self) -> None:
-        self._queue.put(None)
-        self._thread.join(timeout=2)
-        if self._pipe is not None:
-            self._pipe.close()
-            self._pipe = None
-        proc = self._proc
-        self._proc = None
-        if proc is not None and proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-        try:
-            os.remove(_VOICE_FIFO)
-        except OSError:
-            pass
-
-    def _loop(self) -> None:
-        while True:
-            item = self._queue.get()
-            try:
-                if item is None:
-                    return
-                if self._skip or not item or self._pipe is None:
-                    continue
-                self._pipe.write(item)
-                self._pipe.flush()
-                with self._lock:
-                    self._pending += len(item) / 2 / OUTPUT_RATE
-            except Exception as exc:
-                log(f"voice playback failed: {exc}")
-            finally:
-                self._queue.task_done()
+        return

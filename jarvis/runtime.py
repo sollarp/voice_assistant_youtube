@@ -14,8 +14,10 @@ from jarvis.config import (
     MUSIC_VOLUME_NORMAL,
     RATE,
     WAKE_CONFIRM_CHUNKS,
+    WAKE_CONFIRM_CHUNKS_MUSIC,
     WAKE_COOLDOWN_SECONDS,
     WAKE_FALSE_COOLDOWN_SECONDS,
+    WAKE_PLAYBACK_COOLDOWN_SECONDS,
     WAKE_THRESHOLD,
     WAKE_THRESHOLD_MUSIC,
 )
@@ -49,7 +51,7 @@ class Assistant:
             log(f"mpv unavailable: {exc}")
         mic = Microphone()
         wake = WakeWord()
-        speaker = Speaker()
+        speaker = Speaker(self._player)
         log("listening")
         streak = 0
         media_on = False
@@ -70,7 +72,8 @@ class Assistant:
                     streak = 0
                     continue
                 streak += 1
-                if streak < WAKE_CONFIRM_CHUNKS:
+                needed_chunks = WAKE_CONFIRM_CHUNKS_MUSIC if media_on else WAKE_CONFIRM_CHUNKS
+                if streak < needed_chunks:
                     continue
                 streak = 0
                 wake.reset()
@@ -87,7 +90,14 @@ class Assistant:
                 finally:
                     await asyncio.to_thread(speaker.drain)
                     self._player.set_volume(MUSIC_VOLUME_NORMAL)
-                pause = WAKE_COOLDOWN_SECONDS if heard_speech else WAKE_FALSE_COOLDOWN_SECONDS
+                playing = self._player.has_media()
+                if not heard_speech:
+                    pause = WAKE_FALSE_COOLDOWN_SECONDS
+                elif playing:
+                    pause = WAKE_PLAYBACK_COOLDOWN_SECONDS
+                    log("ignoring wake word while the song starts")
+                else:
+                    pause = WAKE_COOLDOWN_SECONDS
                 for _ in range(int(pause * RATE / CHUNK)):
                     await asyncio.to_thread(mic.read)
                 wake.reset()

@@ -45,6 +45,38 @@ class MPVController:
         self.ensure()
         return self._command(["loadfile", url, "replace"])
 
+    def play_clip(self, wav_path: str, seconds: float) -> bool:
+        """Play a short wav on this mpv, then put the song back."""
+        self.ensure()
+        saved_path = None
+        saved_pos = None
+        saved_pause = None
+        if self.has_media():
+            saved_path = self._property("path")
+            saved_pos = self._property("time-pos")
+            saved_pause = self._property("pause")
+        saved_volume = self._property("volume")
+        self._command(["set_property", "volume", 100])
+        if not self._command(["loadfile", wav_path, "replace"]):
+            return False
+        time.sleep(max(0.3, min(seconds + 0.8, 25)))
+        if isinstance(saved_path, str) and saved_path:
+            self._command(["loadfile", saved_path, "replace"])
+            time.sleep(0.5)
+            if isinstance(saved_pos, (int, float)) and float(saved_pos) > 0.4:
+                self._command(["seek", float(saved_pos), "absolute"])
+            if saved_pause is True:
+                self._command(["set_property", "pause", True])
+        if isinstance(saved_volume, (int, float)):
+            self._command(["set_property", "volume", int(saved_volume)])
+        return True
+
+    def _property(self, name: str):
+        payload = self._request(["get_property", name])
+        if not payload or payload.get("error") != "success":
+            return None
+        return payload.get("data")
+
     def pause(self) -> bool:
         self.ensure()
         ok = self._command(["set_property", "pause", True])
