@@ -81,6 +81,7 @@ class LiveGateway:
                     heard_speech = await sender
                     if not heard_speech:
                         log("no speech after wake, ignoring")
+                        speaker.drop()
                     else:
                         await asyncio.wait_for(receiver, timeout=RESPONSE_TIMEOUT)
                 except asyncio.TimeoutError:
@@ -117,25 +118,45 @@ class LiveGateway:
 
 
 async def _stream(session, mic: Microphone, preroll: list[bytes]) -> bool:
-    await _send_activity(session, "start")
     vad = VoiceActivity()
+    held: list[bytes] = []
+    streaming = False
+
+    async def push(pcm: bytes, *, stop_on_idle: bool) -> bool:
+        nonlocal streaming
+        done = vad.update(pcm, stop_on_idle=stop_on_idle or streaming)
+        if not vad.heard_speech:
+            held.append(pcm)
+            if len(held) > 6:
+                del held[:-6]
+            return done
+        if not streaming:
+            streaming = True
+            held.append(pcm)
+            await _send_activity(session, "start")
+            for item in held:
+                await session.send_realtime_input(audio=types.Blob(data=item, mime_type=PCM_MIME))
+            held.clear()
+            return False
+        await session.send_realtime_input(audio=types.Blob(data=pcm, mime_type=PCM_MIME))
+        return done
+
     finished = False
     for pcm in preroll:
-        await session.send_realtime_input(audio=types.Blob(data=pcm, mime_type=PCM_MIME))
-        if vad.update(pcm, stop_on_idle=False):
+        if await push(pcm, stop_on_idle=False):
             finished = True
             break
     if not finished:
         vad.forgive_leading_silence()
         while vad.elapsed < MAX_UTTERANCE_SECONDS:
             pcm = await asyncio.to_thread(mic.read)
-            await session.send_realtime_input(audio=types.Blob(data=pcm, mime_type=PCM_MIME))
-            if vad.update(pcm):
+            if await push(pcm, stop_on_idle=True):
                 break
     log(f"microphone stream ended (speech={vad.heard_speech}, {vad.elapsed:.1f}s)")
-    if vad.heard_speech:
-        await _send_activity(session, "end")
-    return vad.heard_speech
+    if not streaming:
+        return False
+    await _send_activity(session, "end")
+    return True
 
 
 async def _receive(session, speaker: Speaker, tasks: list[asyncio.Task], on_tool: ToolHandler) -> None:

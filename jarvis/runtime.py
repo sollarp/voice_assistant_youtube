@@ -56,18 +56,26 @@ class Assistant:
         streak = 0
         media_on = False
         media_until = 0.0
+        speaker_guard = False
         try:
             while not self._shutdown.is_set():
                 pcm = await asyncio.to_thread(mic.read)
+                if speaker.audible():
+                    if not speaker_guard:
+                        log("ignoring the microphone until the speaker finishes")
+                        speaker_guard = True
+                    streak = 0
+                    continue
+                if speaker_guard:
+                    wake.reset()
+                    speaker_guard = False
+                    streak = 0
+                now = time.monotonic()
+                if now >= media_until:
+                    media_on = self._player.making_sound()
+                    media_until = now + 1.0
                 score = wake.score(pcm)
-                needed = WAKE_THRESHOLD
-                if score > WAKE_THRESHOLD:
-                    now = time.monotonic()
-                    if now >= media_until:
-                        media_on = self._player.has_media()
-                        media_until = now + 1.0
-                    if media_on:
-                        needed = WAKE_THRESHOLD_MUSIC
+                needed = WAKE_THRESHOLD_MUSIC if media_on else WAKE_THRESHOLD
                 if score <= needed:
                     streak = 0
                     continue
@@ -90,7 +98,7 @@ class Assistant:
                 finally:
                     await asyncio.to_thread(speaker.drain)
                     self._player.set_volume(MUSIC_VOLUME_NORMAL)
-                playing = self._player.has_media()
+                playing = self._player.making_sound()
                 if not heard_speech:
                     pause = WAKE_FALSE_COOLDOWN_SECONDS
                 elif playing:

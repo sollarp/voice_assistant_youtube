@@ -1,11 +1,14 @@
 import queue
 import threading
+import time
 
 import numpy as np
 import pyaudio
 
 from jarvis.audio.devices import open_output, resample
 from jarvis.config import OUTPUT_RATE
+
+_ECHO_TAIL = 1.5
 
 
 def _tone(frequency: float, seconds: float) -> bytes:
@@ -27,13 +30,19 @@ class Speaker:
         self._stream, self._rate = open_output(self._pa, prefer_name)
         self._queue: queue.Queue[bytes | None] = queue.Queue()
         self._skip = False
+        self._audible_until = 0.0
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
-    def write(self, pcm: bytes) -> None:
-        if not pcm:
-            return
+    def arm(self) -> None:
         self._skip = False
+
+    def audible(self) -> bool:
+        return time.monotonic() < self._audible_until
+
+    def write(self, pcm: bytes) -> None:
+        if self._skip or not pcm:
+            return
         if self._rate != OUTPUT_RATE:
             pcm = resample(pcm, OUTPUT_RATE, self._rate)
         self._queue.put(pcm)
@@ -49,6 +58,7 @@ class Speaker:
                 self._queue.task_done()
 
     def beep(self) -> None:
+        self.arm()
         self.write(_tone(880, 0.18))
         self.drain()
 
@@ -71,5 +81,9 @@ class Speaker:
                 if self._skip:
                     continue
                 self._stream.write(item)
+                seconds = len(item) / 2 / self._rate
+                now = time.monotonic()
+                start = max(self._audible_until - _ECHO_TAIL, now)
+                self._audible_until = start + seconds + _ECHO_TAIL
             finally:
                 self._queue.task_done()

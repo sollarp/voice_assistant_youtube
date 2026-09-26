@@ -12,6 +12,7 @@ class MPVController:
     def __init__(self) -> None:
         self._proc: subprocess.Popen | None = None
         self._started = False
+        self._busy_until = 0.0
 
     def ensure(self) -> None:
         if self._alive():
@@ -44,7 +45,10 @@ class MPVController:
 
     def play(self, url: str) -> bool:
         self.ensure()
-        return self._command(["loadfile", url, "replace"])
+        ok = self._command(["loadfile", url, "replace"])
+        if ok:
+            self._busy_until = time.monotonic() + 20
+        return ok
 
     def pause(self) -> bool:
         self.ensure()
@@ -61,6 +65,7 @@ class MPVController:
         return ok
 
     def stop(self) -> bool:
+        self._busy_until = 0.0
         if not self._alive():
             return False
         ok = self._command(["stop"])
@@ -109,6 +114,16 @@ class MPVController:
         if not payload or payload.get("error") != "success":
             return False
         return payload.get("data") is False
+
+    def making_sound(self) -> bool:
+        if time.monotonic() < self._busy_until:
+            return True
+        if not self.has_media():
+            return False
+        payload = self._request(["get_property", "pause"])
+        if not payload or payload.get("error") != "success":
+            return True
+        return payload.get("data") is not True
 
     def _command(self, command: list) -> bool:
         payload = self._request(command)

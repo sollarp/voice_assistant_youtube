@@ -6,6 +6,7 @@ from jarvis.config import (
     RATE,
     SILENCE_RMS_THRESHOLD,
     SILENCE_SECONDS,
+    SPEECH_CONFIRM_CHUNKS,
 )
 
 _FRAME = CHUNK / RATE
@@ -23,13 +24,17 @@ class VoiceActivity:
         self.heard_speech = False
         self.silence = 0.0
         self.elapsed = 0.0
+        self._hot = 0
 
     def update(self, pcm: bytes, *, stop_on_idle: bool = True) -> bool:
         self.elapsed += _FRAME
         if pcm_rms(pcm) >= SILENCE_RMS_THRESHOLD:
-            self.heard_speech = True
+            self._hot += 1
             self.silence = 0.0
+            if self._hot >= SPEECH_CONFIRM_CHUNKS:
+                self.heard_speech = True
         else:
+            self._hot = 0
             self.silence += _FRAME
         if self.heard_speech and self.silence >= SILENCE_SECONDS:
             return True
