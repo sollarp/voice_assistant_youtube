@@ -1,0 +1,9 @@
+.venv/
+oww_env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+.DS_Store
+*.mp3
+*.sock

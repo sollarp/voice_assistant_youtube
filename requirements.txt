@@ -1,0 +1,8 @@
+google-genai
+openwakeword
+pyaudio
+numpy
+gTTS
+pygame
+yt-dlp
+python-dotenv
