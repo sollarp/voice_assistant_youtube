@@ -61,7 +61,7 @@ class LiveGateway:
         self._client = client
         self._on_tool = on_tool
 
-    async def run(self, mic: Microphone, speaker: Speaker) -> None:
+    async def run(self, mic: Microphone, speaker: Speaker) -> bool:
         preroll: list[bytes] = []
         stop = asyncio.Event()
         buffer_task = asyncio.create_task(_buffer(mic, stop, preroll))
@@ -76,9 +76,13 @@ class LiveGateway:
                 tasks: list[asyncio.Task] = []
                 sender = asyncio.create_task(_stream(session, mic, preroll))
                 receiver = asyncio.create_task(_receive(session, speaker, tasks, self._on_tool))
+                heard_speech = True
                 try:
-                    await sender
-                    await asyncio.wait_for(receiver, timeout=RESPONSE_TIMEOUT)
+                    heard_speech = await sender
+                    if not heard_speech:
+                        log("no speech after wake, ignoring")
+                    else:
+                        await asyncio.wait_for(receiver, timeout=RESPONSE_TIMEOUT)
                 except asyncio.TimeoutError:
                     log("gemini response wait ended")
                 finally:
@@ -89,6 +93,12 @@ class LiveGateway:
                                 await task
                             except (asyncio.CancelledError, Exception):
                                 pass
+                    if not heard_speech:
+                        for task in tasks:
+                            task.cancel()
+                        speaker.drop()
+                if not heard_speech:
+                    return False
                 if tasks:
                     try:
                         await asyncio.wait_for(asyncio.gather(*tasks), timeout=45)
@@ -103,9 +113,10 @@ class LiveGateway:
                     await buffer_task
                 except Exception:
                     pass
+        return True
 
 
-async def _stream(session, mic: Microphone, preroll: list[bytes]) -> None:
+async def _stream(session, mic: Microphone, preroll: list[bytes]) -> bool:
     await _send_activity(session, "start")
     vad = VoiceActivity()
     finished = False
@@ -122,7 +133,9 @@ async def _stream(session, mic: Microphone, preroll: list[bytes]) -> None:
             if vad.update(pcm):
                 break
     log(f"microphone stream ended (speech={vad.heard_speech}, {vad.elapsed:.1f}s)")
-    await _send_activity(session, "end")
+    if vad.heard_speech:
+        await _send_activity(session, "end")
+    return vad.heard_speech
 
 
 async def _receive(session, speaker: Speaker, tasks: list[asyncio.Task], on_tool: ToolHandler) -> None:

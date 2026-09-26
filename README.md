@@ -46,11 +46,11 @@ python3 main.py
 When the terminal prints `listening`, the microphone is open. Say **Hey Jarvis**, wait for the beep, then speak. Examples:
 
 - “Play Get Lucky by Daft Punk”
-- “Pause” / “Resume” / “Play another version”
+- “Pause” / “Resume” / “Stop” / “Play another version”
 - “What’s the weather in London?”
 - “Milyen az idő Londonban?”
 
-Jarvis ducks music to 15% while you talk, speaks the reply, then restores volume to 100%. Press `Ctrl+C` to stop. `mpv` shuts down with it.
+Jarvis ducks music to 15% while you talk, speaks the reply, then restores volume to 100%. Press `Ctrl+C` to quit. `mpv` shuts down with it.
 
 ## Commands
 
@@ -61,6 +61,7 @@ After **Hey Jarvis**:
 | play [song] | search for the official studio track and stream it |
 | another version | next official match for the current song |
 | pause / resume | hold or continue the current track |
+| stop | end the song |
 | a factual question | Google Search, then a spoken answer under 20 seconds |
 
 The same commands work in Hungarian. `mpv` stays running in the background so you can wake Jarvis again during a song.

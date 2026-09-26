@@ -59,6 +59,14 @@ class MPVController:
             log("resumed")
         return ok
 
+    def stop(self) -> bool:
+        if not self._alive():
+            return False
+        ok = self._command(["stop"])
+        if ok:
+            log("stopped")
+        return ok
+
     def set_volume(self, level: int) -> bool:
         try:
             self.ensure()
@@ -93,7 +101,27 @@ class MPVController:
         except OSError:
             return False
 
+    def has_media(self) -> bool:
+        if not os.path.exists(MPV_IPC_PATH):
+            return False
+        payload = self._request(["get_property", "idle-active"])
+        if not payload or payload.get("error") != "success":
+            return False
+        return payload.get("data") is False
+
     def _command(self, command: list) -> bool:
+        payload = self._request(command)
+        if payload and payload.get("error") == "success":
+            return True
+        if payload:
+            log(f"mpv command failed: {payload.get('error')}")
+        else:
+            log(f"mpv ipc failed: {command[0]}")
+        return False
+
+    def _request(self, command: list) -> dict | None:
+        if not os.path.exists(MPV_IPC_PATH):
+            return None
         for _ in range(3):
             try:
                 sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -108,13 +136,9 @@ class MPVController:
                     raw += chunk
                 sock.close()
                 if not raw:
-                    return False
+                    return None
                 payload = json.loads(raw.decode().split("\n", 1)[0])
-                if payload.get("error") == "success":
-                    return True
-                log(f"mpv command failed: {payload.get('error')}")
-                return False
-            except OSError:
+                return payload if isinstance(payload, dict) else None
+            except (OSError, json.JSONDecodeError):
                 time.sleep(0.1)
-        log(f"mpv ipc failed: {command[0]}")
-        return False
+        return None

@@ -34,6 +34,8 @@ class MusicControl:
             return {"ok": self._player.pause(), "action": action}
         if action == "resume":
             return {"ok": self._player.resume(), "action": action}
+        if action == "stop":
+            return {"ok": self._player.stop(), "action": action}
         if action == "next_version":
             return self._next(query, offset)
         if action == "play":
