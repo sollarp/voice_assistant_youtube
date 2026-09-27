@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import re
+import wave
 from collections.abc import Awaitable, Callable
 
 from google.genai import types
@@ -11,6 +14,7 @@ from jarvis.audio.vad import VoiceActivity
 from jarvis.config import (
     LIVE_MODEL,
     MAX_UTTERANCE_SECONDS,
+    OUTPUT_RATE,
     PCM_MIME,
     RESPONSE_TIMEOUT,
 )
@@ -162,15 +166,27 @@ async def _stream(session, mic: Microphone, preroll: list[bytes]) -> bool:
 async def _receive(session, speaker: Speaker, tasks: list[asyncio.Task], on_tool: ToolHandler) -> None:
     heard: list[str] = []
     spoken: list[str] = []
+    shapes: list[str] = []
+    audio = bytearray()
+    audio_rate = OUTPUT_RATE
+    chunks = 0
     try:
         async for response in session.receive():
             tool_call = getattr(response, "tool_call", None)
             if tool_call:
                 for call in tool_call.function_calls or []:
                     tasks.append(asyncio.create_task(_run_tool(session, call, on_tool)))
-            audio = getattr(response, "data", None)
-            if audio:
-                speaker.write(audio)
+            shape = _shape(response)
+            if shape and shape not in shapes:
+                shapes.append(shape)
+            for mime, pcm in _audio_parts(response):
+                rate = _pcm_rate(mime)
+                if chunks == 0:
+                    audio_rate = rate
+                    log(f"gemini audio {mime}, {len(pcm)} bytes, rms={_rms(pcm):.0f}")
+                chunks += 1
+                audio.extend(pcm)
+                speaker.write(pcm, rate)
             content = getattr(response, "server_content", None)
             if content is not None:
                 _collect(content, "input_transcription", heard)
@@ -184,6 +200,109 @@ async def _receive(session, speaker: Speaker, tasks: list[asyncio.Task], on_tool
             log(f"heard: {heard_text}")
         if spoken_text:
             log(f"jarvis: {spoken_text}")
+        if chunks == 0:
+            detail = " | ".join(shapes[:6]) or "no server messages"
+            log(f"gemini audio missing: {detail}")
+        else:
+            log(f"gemini audio {chunks} chunks, {len(audio)} bytes, {audio_rate} Hz")
+            _save_wav(bytes(audio), audio_rate)
+
+
+def _audio_parts(response) -> list[tuple[str, bytes]]:
+    content = getattr(response, "server_content", None)
+    turn = getattr(content, "model_turn", None) if content is not None else None
+    found: list[tuple[str, bytes]] = []
+    for part in getattr(turn, "parts", None) or []:
+        inline = getattr(part, "inline_data", None)
+        if inline is None:
+            continue
+        pcm = _as_pcm(getattr(inline, "data", None))
+        if pcm is None:
+            continue
+        mime = str(getattr(inline, "mime_type", None) or "audio/pcm")
+        if "audio" in mime or "pcm" in mime or "l16" in mime:
+            found.append((mime, pcm))
+    if found:
+        return found
+    pcm = _as_pcm(getattr(response, "data", None))
+    if pcm is not None:
+        return [("audio/pcm", pcm)]
+    return []
+
+
+def _as_pcm(raw) -> bytes | None:
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        try:
+            raw = base64.b64decode(raw)
+        except Exception:
+            return None
+    if isinstance(raw, memoryview):
+        raw = raw.tobytes()
+    elif isinstance(raw, bytearray):
+        raw = bytes(raw)
+    if not isinstance(raw, bytes) or len(raw) < 2:
+        return None
+    return raw[: len(raw) // 2 * 2]
+
+
+def _pcm_rate(mime: str) -> int:
+    match = re.search(r"rate=(\d+)", mime)
+    return int(match.group(1)) if match else OUTPUT_RATE
+
+
+def _rms(pcm: bytes) -> float:
+    count = min(len(pcm) // 2, 2400)
+    if count == 0:
+        return 0.0
+    total = 0
+    for index in range(count):
+        sample = int.from_bytes(pcm[index * 2 : index * 2 + 2], "little", signed=True)
+        total += sample * sample
+    return (total / count) ** 0.5
+
+
+def _shape(response) -> str:
+    bits: list[str] = []
+    if getattr(response, "tool_call", None):
+        bits.append("tool_call")
+    content = getattr(response, "server_content", None)
+    if content is None:
+        return ",".join(bits)
+    if getattr(content, "input_transcription", None):
+        bits.append("input_transcription")
+    if getattr(content, "output_transcription", None):
+        bits.append("output_transcription")
+    if getattr(content, "interrupted", False):
+        bits.append("interrupted")
+    if getattr(content, "turn_complete", False):
+        bits.append("turn_complete")
+    turn = getattr(content, "model_turn", None)
+    for part in getattr(turn, "parts", None) or []:
+        inline = getattr(part, "inline_data", None)
+        if inline is not None:
+            data = getattr(inline, "data", None)
+            mime = getattr(inline, "mime_type", None) or "?"
+            size = len(data) if hasattr(data, "__len__") else 0
+            bits.append(f"inline:{mime}:{type(data).__name__}:{size}")
+        elif getattr(part, "text", None):
+            bits.append("text")
+    return ",".join(bits)
+
+
+def _save_wav(pcm: bytes, rate: int) -> None:
+    path = "/tmp/jarvis-reply.wav"
+    try:
+        with wave.open(path, "wb") as handle:
+            handle.setnchannels(1)
+            handle.setsampwidth(2)
+            handle.setframerate(rate)
+            handle.writeframes(pcm)
+    except OSError as exc:
+        log(f"could not save {path}: {exc}")
+        return
+    log(f"saved {path}")
 
 
 def _collect(content, name: str, parts: list[str]) -> None:
