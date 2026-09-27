@@ -13,6 +13,7 @@ class MPVController:
         self._proc: subprocess.Popen | None = None
         self._started = False
         self._busy_until = 0.0
+        self._user_level = 10
 
     def ensure(self) -> None:
         if self._alive():
@@ -78,6 +79,32 @@ class MPVController:
         if ok:
             log("stopped")
         return ok
+
+    @property
+    def user_level(self) -> int:
+        return self._user_level
+
+    def remember_level(self, level: int) -> int:
+        self._user_level = min(10, max(1, int(level)))
+        return self._user_level
+
+    def set_user_level(self, level: int) -> int:
+        self.remember_level(level)
+        self.set_volume(self._user_level * 10)
+        return self._user_level
+
+    def change_user_level(self, steps: int) -> int:
+        return self.set_user_level(self._user_level + steps)
+
+    def duck(self) -> bool:
+        current = self._user_level * 10
+        target = max(5, current * 15 // 100)
+        if target >= current:
+            target = max(1, current // 2)
+        return self.set_volume(target)
+
+    def restore(self) -> bool:
+        return self.set_volume(self._user_level * 10)
 
     def set_volume(self, level: int) -> bool:
         try:

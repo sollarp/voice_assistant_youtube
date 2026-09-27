@@ -40,7 +40,7 @@ def match_score(query: str, track: dict) -> int:
 class Library:
     def __init__(self, path: str = _PATH) -> None:
         self._path = path
-        self._data = {"history": [], "playlists": {}}
+        self._data = {"history": [], "playlists": {}, "volume": 10}
         self._load()
 
     def find(self, query: str) -> tuple[str, dict] | None:
@@ -94,6 +94,40 @@ class Library:
         self._save()
         return title
 
+    def names(self) -> list[str]:
+        return list(self._data["playlists"])
+
+    def volume_level(self) -> int:
+        try:
+            level = int(self._data.get("volume", 10))
+        except (TypeError, ValueError):
+            level = 10
+        return min(10, max(1, level))
+
+    def set_volume_level(self, level: int) -> int:
+        stored = min(10, max(1, int(level)))
+        self._data["volume"] = stored
+        self._save()
+        return stored
+
+    def remove_track(self, track: dict) -> str:
+        saved = _record(track)
+        self._data["history"] = [
+            item for item in self._data["history"] if not _same(item, saved)
+        ]
+        for name, tracks in self._data["playlists"].items():
+            self._data["playlists"][name] = [item for item in tracks if not _same(item, saved)]
+        self._save()
+        return saved["title"] or saved["query"]
+
+    def delete_playlist(self, name: str) -> str:
+        title = self._playlist_name(name)
+        if title is None:
+            raise KeyError(name.strip())
+        del self._data["playlists"][title]
+        self._save()
+        return title
+
     def tracks(self, name: str) -> list[dict]:
         title = self._playlist_name(name)
         if title is None:
@@ -127,6 +161,10 @@ class Library:
                 for name, tracks in playlists.items()
                 if isinstance(tracks, list)
             }
+        try:
+            self._data["volume"] = min(10, max(1, int(payload.get("volume", 10))))
+        except (TypeError, ValueError):
+            self._data["volume"] = 10
 
     def _save(self) -> None:
         temporary = f"{self._path}.tmp"

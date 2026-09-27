@@ -10,6 +10,12 @@ SYSTEM_INSTRUCTION = (
     "and do not call the tool yet. "
     "Play my playlist NAME in random means play_playlist with order random. "
     "Play my playlist NAME in order means play_playlist with order normal. "
+    "Volume is a scale from 1 to 10, and 10 is the loudest. "
+    "Volume up means volume_up. Volume down means volume_down. "
+    "A number from 1 to 10 means set_volume with that level. "
+    "Delete this song means delete_song with no query. "
+    "Delete the playlist called NAME means delete_playlist with that name. "
+    "What playlists do you have means list_playlists, then say every returned name. "
     "Use Google Search for factual queries. Keep all spoken responses under 20 seconds."
 )
 
@@ -26,6 +32,11 @@ MUSIC_TOOL = {
         "For 'play my playlist NAME' with no order, do not call the tool; ask normal or random. "
         "For 'play my playlist NAME in random', call it with order random. "
         "For 'play my playlist NAME in order', call it with order normal. "
+        "volume_up raises the level by 2. volume_down lowers it by 2. "
+        "set_volume uses level 1 to 10. "
+        "delete_song removes the current song from the library when query is omitted. "
+        "delete_playlist removes the named list. "
+        "list_playlists returns the playlist names; say those names to the user. "
         "The same commands work in Hungarian, including lejátszási lista, sorban, and keverve. "
         "query is the song and artist. name is the playlist name. "
         "offset is the 1-based official match and defaults to 1."
@@ -45,10 +56,17 @@ MUSIC_TOOL = {
                     "create_playlist",
                     "add_to_playlist",
                     "play_playlist",
+                    "volume_up",
+                    "volume_down",
+                    "set_volume",
+                    "delete_song",
+                    "delete_playlist",
+                    "list_playlists",
                 ],
             },
             "query": {"type": "STRING"},
             "name": {"type": "STRING"},
+            "level": {"type": "INTEGER"},
             "order": {"type": "STRING", "enum": ["normal", "random"]},
             "offset": {"type": "INTEGER"},
         },

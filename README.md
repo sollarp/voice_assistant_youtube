@@ -43,28 +43,31 @@ python3 main.py
 
 `python3 -m jarvis` does the same thing.
 
-When the terminal prints `listening`, the microphone is open. Say **Hey Jarvis**, wait for the beep, then speak. Examples:
-
-- “Play Get Lucky by Daft Punk”
-- “Pause” / “Resume” / “Stop” / “Play another version”
-- “What’s the weather in London?”
-- “Milyen az idő Londonban?”
-
-Jarvis ducks music to 15% while you talk, speaks the reply, then restores volume to 100%. Press `Ctrl+C` to quit. `mpv` shuts down with it.
+When the terminal prints `listening`, the microphone is open. Say **Hey Jarvis**, wait for the beep, then speak. Music ducks while you talk, then returns to the volume you set. Press `Ctrl+C` to quit. `mpv` shuts down with it.
 
 ## Commands
 
-After **Hey Jarvis**:
+Say **Hey Jarvis**, then a command in English or Hungarian.
 
-| You say | What happens |
-|---|---|
-| play [song] | search for the official studio track and stream it |
-| another version | next official match for the current song |
-| pause / resume | hold or continue the current track |
-| stop | end the song |
-| a factual question | Google Search, then a spoken answer under 20 seconds |
-
-The same commands work in Hungarian. `mpv` stays running in the background so you can wake Jarvis again during a song.
+| English | Hungarian | What happens |
+|---|---|---|
+| Play [song] | Játszd le [dal] | Plays a saved song if it is in history or a playlist. Otherwise searches YouTube once and remembers it. |
+| Another version | Másik verzió | Plays the next official recording of the current song. |
+| Pause | Szünet | Holds the song. |
+| Resume | Folytasd | Continues the song. |
+| Stop | Állj | Ends the song and clears a queued playlist. |
+| Create a playlist called [name] | Készíts egy [név] lejátszási listát | Creates an empty named playlist. |
+| Add this song to my playlist [name] | Add hozzá ezt a dalt a [név] listához | Saves the song that is playing. |
+| Play my playlist [name] | Játszd le a [név] listámat | Asks whether to play in order or at random. |
+| Play my playlist [name] in order | Játszd le a [név] listámat sorban | Plays that playlist from first to last. |
+| Play my playlist [name] in random | Játszd le a [név] listámat keverve | Plays that playlist in random order. |
+| Volume up | Hangerő fel | Raises the volume by 2 steps. |
+| Volume down | Hangerő le | Lowers the volume by 2 steps. |
+| Set volume to [1–10] | Hangerő [1–10] | Sets the volume. 10 is the loudest. |
+| Delete this song | Töröld ezt a dalt | Removes the playing song from history and every playlist. |
+| Delete the playlist called [name] | Töröld a [név] lejátszási listát | Deletes that playlist. |
+| What playlists do you have? | Milyen lejátszási listáid vannak? | Says the saved playlist names. |
+| What’s the weather in London? | Milyen az idő Londonban? | Looks up the fact and answers in under 20 seconds. |
 
 ## Environment
 

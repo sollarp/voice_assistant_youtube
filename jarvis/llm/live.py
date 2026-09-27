@@ -333,6 +333,7 @@ async def _run_tool(session, call, on_tool: ToolHandler) -> None:
     except Exception as exc:
         log(f"tool failed: {exc}")
         result = {"ok": False, "error": str(exc)}
+    speak = bool(result.pop("speak", False)) if isinstance(result, dict) else False
     body = {"output": result} if result.get("ok") else {"error": result.get("error") or "failed"}
     try:
         await session.send_tool_response(
@@ -340,7 +341,7 @@ async def _run_tool(session, call, on_tool: ToolHandler) -> None:
                 types.FunctionResponse(
                     id=getattr(call, "id", None),
                     name=name,
-                    scheduling="SILENT",
+                    scheduling="WHEN_IDLE" if speak else "SILENT",
                     response=body,
                 )
             ]

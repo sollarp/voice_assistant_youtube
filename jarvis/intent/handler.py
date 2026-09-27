@@ -5,7 +5,6 @@ import random
 import threading
 
 from jarvis.audio.player import MPVController
-from jarvis.config import MUSIC_VOLUME_NORMAL
 from jarvis.log import log
 from jarvis.media.library import Library
 from jarvis.media.youtube import YouTubeResolver, studio_query
@@ -34,6 +33,7 @@ class MusicControl:
         self._player = player
         self._resolver = resolver
         self._library = Library()
+        self._player.remember_level(self._library.volume_level())
         self._query: str | None = None
         self._current: dict | None = None
         self._offset = 1
@@ -77,6 +77,18 @@ class MusicControl:
             return self._add_to_playlist(name, query)
         if action == "play_playlist":
             return self._play_playlist(name, order)
+        if action == "volume_up":
+            return self._volume(self._player.change_user_level(2))
+        if action == "volume_down":
+            return self._volume(self._player.change_user_level(-2))
+        if action == "set_volume":
+            return self._set_volume(args.get("level"))
+        if action == "delete_song":
+            return self._delete_song(query)
+        if action == "delete_playlist":
+            return self._delete_playlist(name)
+        if action == "list_playlists":
+            return self._list_playlists()
         return {"ok": False, "error": f"unsupported action {action}"}
 
     def _next(self, query: str | None, offset: int) -> dict:
@@ -180,7 +192,7 @@ class MusicControl:
             track = {**track, **fresh, "query": track.get("query") or fresh["title"]}
         if not self._player.play(str(stream)):
             return {"ok": False, "error": "mpv rejected the stream"}
-        self._player.set_volume(MUSIC_VOLUME_NORMAL)
+        self._player.restore()
         self._library.remember(track)
         self._current = {
             "title": str(track.get("title") or ""),
@@ -218,6 +230,50 @@ class MusicControl:
                     log(f"queued {fresh['title']}")
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _volume(self, level: int) -> dict:
+        stored = self._library.set_volume_level(level)
+        log(f"volume {stored}")
+        return {"ok": True, "action": "volume", "level": stored, "speak": True}
+
+    def _set_volume(self, level) -> dict:
+        try:
+            requested = int(level)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "ask for a volume from 1 to 10"}
+        if requested < 1 or requested > 10:
+            return {"ok": False, "error": "volume must be from 1 to 10"}
+        self._player.set_user_level(requested)
+        return self._volume(requested)
+
+    def _delete_song(self, query: str | None) -> dict:
+        if _mentions_current(query):
+            track = self._current
+        else:
+            found = self._library.find(query or "")
+            track = found[1] if found is not None else None
+        if not track:
+            return {"ok": False, "error": "that song is not in the library"}
+        title = self._library.remove_track(track)
+        if self._current and title == self._current.get("title"):
+            self._current = None
+        log(f"deleted song {title}")
+        return {"ok": True, "action": "delete_song", "title": title, "speak": True}
+
+    def _delete_playlist(self, name: str) -> dict:
+        if not name:
+            return {"ok": False, "error": "missing playlist name"}
+        try:
+            title = self._library.delete_playlist(name)
+        except KeyError:
+            return {"ok": False, "error": f"no playlist named {name}"}
+        log(f"deleted playlist {title}")
+        return {"ok": True, "action": "delete_playlist", "name": title, "speak": True}
+
+    def _list_playlists(self) -> dict:
+        names = self._library.names()
+        log(f"playlists {names}")
+        return {"ok": True, "action": "list_playlists", "playlists": names, "speak": True}
 
     def _cancel_queue(self) -> None:
         self._queue_token += 1

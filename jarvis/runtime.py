@@ -10,8 +10,6 @@ from jarvis.audio.player import MPVController
 from jarvis.audio.speaker import Speaker
 from jarvis.config import (
     CHUNK,
-    MUSIC_VOLUME_DUCKED,
-    MUSIC_VOLUME_NORMAL,
     RATE,
     WAKE_CONFIRM_CHUNKS,
     WAKE_CONFIRM_CHUNKS_MUSIC,
@@ -49,6 +47,7 @@ class Assistant:
         log("starting")
         try:
             await asyncio.to_thread(self._player.ensure)
+            await asyncio.to_thread(self._player.restore)
         except Exception as exc:
             log(f"mpv unavailable: {exc}")
         mic = Microphone()
@@ -101,7 +100,7 @@ class Assistant:
                 wake.reset()
                 heard_speech = True
                 try:
-                    self._player.set_volume(MUSIC_VOLUME_DUCKED)
+                    self._player.duck()
                     log(f"Hey Jarvis ({score:.2f})")
                     await asyncio.to_thread(speaker.beep)
                     for _ in range(4):
@@ -111,7 +110,7 @@ class Assistant:
                     log(f"wake handling failed: {exc}")
                 finally:
                     await asyncio.to_thread(speaker.drain)
-                    self._player.set_volume(MUSIC_VOLUME_NORMAL)
+                    self._player.restore()
                 playing = self._player.making_sound()
                 if not heard_speech:
                     pause = WAKE_FALSE_COOLDOWN_SECONDS
