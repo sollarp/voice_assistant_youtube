@@ -18,6 +18,8 @@ from jarvis.config import (
     WAKE_COOLDOWN_SECONDS,
     WAKE_FALSE_COOLDOWN_SECONDS,
     WAKE_PLAYBACK_COOLDOWN_SECONDS,
+    WAKE_QUIET,
+    WAKE_QUIET_CHUNKS,
     WAKE_THRESHOLD,
     WAKE_THRESHOLD_MUSIC,
 )
@@ -54,6 +56,7 @@ class Assistant:
         speaker = Speaker(mic.device_name)
         log("listening")
         streak = 0
+        calm = 0
         media_on = False
         media_until = 0.0
         speaker_guard = False
@@ -65,16 +68,26 @@ class Assistant:
                         log("ignoring the microphone until the speaker finishes")
                         speaker_guard = True
                     streak = 0
+                    calm = 0
                     continue
                 if speaker_guard:
                     wake.reset()
                     speaker_guard = False
                     streak = 0
+                    calm = 0
                 now = time.monotonic()
                 if now >= media_until:
                     media_on = self._player.making_sound()
                     media_until = now + 1.0
                 score = wake.score(pcm)
+                if score < WAKE_QUIET:
+                    calm = WAKE_QUIET_CHUNKS
+                    streak = 0
+                    continue
+                if calm <= 0:
+                    streak = 0
+                    continue
+                calm -= 1
                 needed = WAKE_THRESHOLD_MUSIC if media_on else WAKE_THRESHOLD
                 if score <= needed:
                     streak = 0
@@ -84,11 +97,12 @@ class Assistant:
                 if streak < needed_chunks:
                     continue
                 streak = 0
+                calm = 0
                 wake.reset()
                 heard_speech = True
                 try:
                     self._player.set_volume(MUSIC_VOLUME_DUCKED)
-                    log("Hey Jarvis")
+                    log(f"Hey Jarvis ({score:.2f})")
                     await asyncio.to_thread(speaker.beep)
                     for _ in range(4):
                         await asyncio.to_thread(mic.read)

@@ -203,10 +203,11 @@ async def _receive(session, speaker: Speaker, tasks: list[asyncio.Task], on_tool
             log(f"jarvis: {spoken_text}")
         if chunks == 0:
             detail = " | ".join(shapes[:6]) or "no server messages"
-            log(f"wav not written, no audio bytes from gemini: {detail}")
+            _status(f"wav not written, no audio bytes from gemini: {detail}")
         else:
             log(f"gemini audio {chunks} chunks, {len(audio)} bytes, {audio_rate} Hz")
             _save_wav(bytes(audio), audio_rate)
+            _status(f"saved wav, {chunks} chunks, {len(audio)} bytes, {audio_rate} Hz")
 
 
 def _audio_parts(response) -> list[tuple[str, bytes]]:
@@ -228,7 +229,31 @@ def _audio_parts(response) -> list[tuple[str, bytes]]:
     pcm = _as_pcm(getattr(response, "data", None))
     if pcm is not None:
         return [("audio/pcm", pcm)]
-    return []
+    return _audio_from_dump(response)
+
+
+def _audio_from_dump(response) -> list[tuple[str, bytes]]:
+    try:
+        payload = response.model_dump(mode="json")
+    except Exception:
+        return []
+    found: list[tuple[str, bytes]] = []
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            mime = str(node.get("mime_type") or node.get("mimeType") or "")
+            if "audio" in mime or "pcm" in mime or "l16" in mime:
+                pcm = _as_pcm(node.get("data"))
+                if pcm is not None:
+                    found.append((mime or "audio/pcm", pcm))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(payload)
+    return found
 
 
 def _as_pcm(raw) -> bytes | None:
@@ -290,6 +315,16 @@ def _shape(response) -> str:
         elif getattr(part, "text", None):
             bits.append("text")
     return ",".join(bits)
+
+
+def _status(text: str) -> None:
+    log(text)
+    for path in ("/tmp/jarvis-reply.txt", os.path.join(os.getcwd(), "jarvis-reply.txt")):
+        try:
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(text + "\n")
+        except OSError as exc:
+            log(f"could not write {path}: {exc}")
 
 
 def _save_wav(pcm: bytes, rate: int) -> None:
