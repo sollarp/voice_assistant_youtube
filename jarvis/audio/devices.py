@@ -112,9 +112,11 @@ def card_of(name: str) -> str | None:
 def _output_rank(info: dict, mic_card: str | None) -> tuple[int, str]:
     name = str(info.get("name") or "")
     lowered = name.lower()
-    # The 3.5 mm jack shows up as the Headphones device, separate from the USB mic.
-    if "headphone" in lowered:
+    # Pi 4 3.5 mm jack: card 2, bcm2835, device 0. Not the USB mic.
+    if "hw:2,0" in lowered or ("bcm2835" in lowered and "hdmi" not in lowered):
         return (0, lowered)
+    if "headphone" in lowered:
+        return (1, lowered)
     if mic_card and f"hw:{mic_card}" in lowered:
         return (6, lowered)
     if "hdmi" in lowered or "vc4" in lowered or "usb" in lowered:
