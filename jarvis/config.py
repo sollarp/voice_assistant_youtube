@@ -30,6 +30,7 @@ MAX_UTTERANCE_SECONDS = 5.0
 RESPONSE_TIMEOUT = 40.0
 
 LIVE_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-live")
+GEMINI_VOICE = "Orus"
 
 MPV_IPC_PATH = "/tmp/mpvsocket"
 MUSIC_VOLUME_NORMAL = 100

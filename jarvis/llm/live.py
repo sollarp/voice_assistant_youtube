@@ -11,6 +11,7 @@ from jarvis.audio.microphone import Microphone
 from jarvis.audio.speaker import Speaker
 from jarvis.audio.vad import VoiceActivity
 from jarvis.config import (
+    GEMINI_VOICE,
     LIVE_MODEL,
     MAX_UTTERANCE_SECONDS,
     OUTPUT_RATE,
@@ -26,6 +27,13 @@ ToolHandler = Callable[[dict], Awaitable[dict]]
 def _live_config() -> types.LiveConnectConfig:
     return types.LiveConnectConfig(
         response_modalities=["AUDIO"],
+        speech_config=types.SpeechConfig(
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                    voice_name=GEMINI_VOICE,
+                )
+            )
+        ),
         system_instruction=SYSTEM_INSTRUCTION,
         input_audio_transcription=types.AudioTranscriptionConfig(),
         output_audio_transcription=types.AudioTranscriptionConfig(),
