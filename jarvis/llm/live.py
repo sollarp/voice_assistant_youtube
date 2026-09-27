@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import os
 import re
 import wave
@@ -171,8 +172,10 @@ async def _receive(session, speaker: Speaker, tasks: list[asyncio.Task], on_tool
     audio = bytearray()
     audio_rate = OUTPUT_RATE
     chunks = 0
+    _start_dump()
     try:
         async for response in session.receive():
+            _save_response(response)
             tool_call = getattr(response, "tool_call", None)
             if tool_call:
                 for call in tool_call.function_calls or []:
@@ -201,6 +204,7 @@ async def _receive(session, speaker: Speaker, tasks: list[asyncio.Task], on_tool
             log(f"heard: {heard_text}")
         if spoken_text:
             log(f"jarvis: {spoken_text}")
+        log("saved /tmp/jarvis-response.jsonl")
         if chunks == 0:
             detail = " | ".join(shapes[:6]) or "no server messages"
             _status(f"wav not written, no audio bytes from gemini: {detail}")
@@ -315,6 +319,26 @@ def _shape(response) -> str:
         elif getattr(part, "text", None):
             bits.append("text")
     return ",".join(bits)
+
+
+def _start_dump() -> None:
+    try:
+        with open("/tmp/jarvis-response.jsonl", "w", encoding="utf-8"):
+            pass
+    except OSError as exc:
+        log(f"could not open /tmp/jarvis-response.jsonl: {exc}")
+
+
+def _save_response(response) -> None:
+    try:
+        payload = response.model_dump(mode="json")
+    except Exception:
+        payload = {"repr": repr(response)}
+    try:
+        with open("/tmp/jarvis-response.jsonl", "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, default=str) + "\n")
+    except OSError as exc:
+        log(f"could not save /tmp/jarvis-response.jsonl: {exc}")
 
 
 def _status(text: str) -> None:
