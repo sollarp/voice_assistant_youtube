@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import os
 import re
 import wave
 from collections.abc import Awaitable, Callable
@@ -202,7 +203,7 @@ async def _receive(session, speaker: Speaker, tasks: list[asyncio.Task], on_tool
             log(f"jarvis: {spoken_text}")
         if chunks == 0:
             detail = " | ".join(shapes[:6]) or "no server messages"
-            log(f"gemini audio missing: {detail}")
+            log(f"wav not written, no audio bytes from gemini: {detail}")
         else:
             log(f"gemini audio {chunks} chunks, {len(audio)} bytes, {audio_rate} Hz")
             _save_wav(bytes(audio), audio_rate)
@@ -292,17 +293,21 @@ def _shape(response) -> str:
 
 
 def _save_wav(pcm: bytes, rate: int) -> None:
-    path = "/tmp/jarvis-reply.wav"
-    try:
-        with wave.open(path, "wb") as handle:
-            handle.setnchannels(1)
-            handle.setsampwidth(2)
-            handle.setframerate(rate)
-            handle.writeframes(pcm)
-    except OSError as exc:
-        log(f"could not save {path}: {exc}")
-        return
-    log(f"saved {path}")
+    paths = (
+        "/tmp/jarvis-reply.wav",
+        os.path.join(os.getcwd(), "jarvis-reply.wav"),
+    )
+    for path in paths:
+        try:
+            with wave.open(path, "wb") as handle:
+                handle.setnchannels(1)
+                handle.setsampwidth(2)
+                handle.setframerate(rate)
+                handle.writeframes(pcm)
+        except OSError as exc:
+            log(f"could not save {path}: {exc}")
+            continue
+        log(f"saved {path}")
 
 
 def _collect(content, name: str, parts: list[str]) -> None:
