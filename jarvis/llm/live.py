@@ -2,10 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import json
-import os
 import re
-import wave
 from collections.abc import Awaitable, Callable
 
 from google.genai import types
@@ -169,13 +166,9 @@ async def _receive(session, speaker: Speaker, tasks: list[asyncio.Task], on_tool
     heard: list[str] = []
     spoken: list[str] = []
     shapes: list[str] = []
-    audio = bytearray()
-    audio_rate = OUTPUT_RATE
     chunks = 0
-    _start_dump()
     try:
         async for response in session.receive():
-            _save_response(response)
             tool_call = getattr(response, "tool_call", None)
             if tool_call:
                 for call in tool_call.function_calls or []:
@@ -186,10 +179,8 @@ async def _receive(session, speaker: Speaker, tasks: list[asyncio.Task], on_tool
             for mime, pcm in _audio_parts(response):
                 rate = _pcm_rate(mime)
                 if chunks == 0:
-                    audio_rate = rate
                     log(f"gemini audio {mime}, {len(pcm)} bytes, rms={_rms(pcm):.0f}")
                 chunks += 1
-                audio.extend(pcm)
                 speaker.write(pcm, rate)
             content = getattr(response, "server_content", None)
             if content is not None:
@@ -204,14 +195,9 @@ async def _receive(session, speaker: Speaker, tasks: list[asyncio.Task], on_tool
             log(f"heard: {heard_text}")
         if spoken_text:
             log(f"jarvis: {spoken_text}")
-        log("saved /tmp/jarvis-response.jsonl")
         if chunks == 0:
             detail = " | ".join(shapes[:6]) or "no server messages"
-            _status(f"wav not written, no audio bytes from gemini: {detail}")
-        else:
-            log(f"gemini audio {chunks} chunks, {len(audio)} bytes, {audio_rate} Hz")
-            _save_wav(bytes(audio), audio_rate)
-            _status(f"saved wav, {chunks} chunks, {len(audio)} bytes, {audio_rate} Hz")
+            log(f"gemini reply had no audio: {detail}")
 
 
 def _audio_parts(response) -> list[tuple[str, bytes]]:
@@ -319,54 +305,6 @@ def _shape(response) -> str:
         elif getattr(part, "text", None):
             bits.append("text")
     return ",".join(bits)
-
-
-def _start_dump() -> None:
-    try:
-        with open("/tmp/jarvis-response.jsonl", "w", encoding="utf-8"):
-            pass
-    except OSError as exc:
-        log(f"could not open /tmp/jarvis-response.jsonl: {exc}")
-
-
-def _save_response(response) -> None:
-    try:
-        payload = response.model_dump(mode="json")
-    except Exception:
-        payload = {"repr": repr(response)}
-    try:
-        with open("/tmp/jarvis-response.jsonl", "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, default=str) + "\n")
-    except OSError as exc:
-        log(f"could not save /tmp/jarvis-response.jsonl: {exc}")
-
-
-def _status(text: str) -> None:
-    log(text)
-    for path in ("/tmp/jarvis-reply.txt", os.path.join(os.getcwd(), "jarvis-reply.txt")):
-        try:
-            with open(path, "w", encoding="utf-8") as handle:
-                handle.write(text + "\n")
-        except OSError as exc:
-            log(f"could not write {path}: {exc}")
-
-
-def _save_wav(pcm: bytes, rate: int) -> None:
-    paths = (
-        "/tmp/jarvis-reply.wav",
-        os.path.join(os.getcwd(), "jarvis-reply.wav"),
-    )
-    for path in paths:
-        try:
-            with wave.open(path, "wb") as handle:
-                handle.setnchannels(1)
-                handle.setsampwidth(2)
-                handle.setframerate(rate)
-                handle.writeframes(pcm)
-        except OSError as exc:
-            log(f"could not save {path}: {exc}")
-            continue
-        log(f"saved {path}")
 
 
 def _collect(content, name: str, parts: list[str]) -> None:
