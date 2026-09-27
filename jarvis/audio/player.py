@@ -45,10 +45,15 @@ class MPVController:
 
     def play(self, url: str) -> bool:
         self.ensure()
+        self._command(["playlist-clear"])
         ok = self._command(["loadfile", url, "replace"])
         if ok:
             self._busy_until = time.monotonic() + 20
         return ok
+
+    def append(self, url: str) -> bool:
+        self.ensure()
+        return self._command(["loadfile", url, "append"])
 
     def pause(self) -> bool:
         self.ensure()
@@ -69,6 +74,7 @@ class MPVController:
         if not self._alive():
             return False
         ok = self._command(["stop"])
+        self._command(["playlist-clear"])
         if ok:
             log("stopped")
         return ok

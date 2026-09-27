@@ -146,7 +146,32 @@ class YouTubeResolver:
             page = f"https://www.youtube.com/watch?v={video_id}"
         if not page:
             raise RuntimeError(f"incomplete metadata for {song!r}")
-        return {"title": title, "webpage_url": str(page), "stream_url": stream}
+        return {
+            "title": title,
+            "webpage_url": str(page),
+            "stream_url": stream,
+            "video_id": str(video_id or ""),
+        }
+
+    def resolve_page(self, page: str) -> dict[str, str]:
+        if not page:
+            raise RuntimeError("missing saved track")
+        log(f"reusing saved track {page}")
+        with YoutubeDL(_YDL_OPTS) as ydl:
+            info = ydl.extract_info(page, download=False)
+        if not isinstance(info, dict):
+            raise RuntimeError(f"saved track unavailable: {page}")
+        stream = direct_audio_url(info)
+        if not stream:
+            raise RuntimeError(f"no audio stream for {info.get('title') or page}")
+        video_id = info.get("id")
+        webpage = info.get("webpage_url") or page
+        return {
+            "title": str(info.get("title") or page),
+            "webpage_url": str(webpage),
+            "stream_url": stream,
+            "video_id": str(video_id or ""),
+        }
 
     def _search(self, query: str) -> list[dict]:
         with YoutubeDL(_YDL_OPTS) as ydl:
