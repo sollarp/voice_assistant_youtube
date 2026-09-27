@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from jarvis.audio.player import MPVController
-from jarvis.config import MUSIC_VOLUME_DUCKED
+from jarvis.config import MUSIC_VOLUME_NORMAL
 from jarvis.log import log
 from jarvis.media.youtube import YouTubeResolver, studio_query
 
@@ -60,7 +60,7 @@ class MusicControl:
         track = self._resolver.resolve(query, offset=offset)
         if not self._player.play(track["stream_url"]):
             return {"ok": False, "error": "mpv rejected the stream"}
-        self._player.set_volume(MUSIC_VOLUME_DUCKED)
+        self._player.set_volume(MUSIC_VOLUME_NORMAL)
         self._query = studio_query(query)
         self._offset = offset
         print(track["webpage_url"], flush=True)
